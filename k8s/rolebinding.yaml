@@ -1,0 +1,16 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: employee-api-binding
+  namespace: employee-prod
+
+subjects:
+
+- kind: ServiceAccount
+  name: employee-api-sa
+  namespace: employee-prod
+
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: employee-api-role

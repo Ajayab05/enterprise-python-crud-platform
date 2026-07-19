@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: employee-ui
+  namespace: employee-prod
+  labels:
+    app.kubernetes.io/name: employee-ui
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: employee-management
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  type: ClusterIP
+
+  selector:
+    app: employee-ui
+
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: http
+
+  sessionAffinity: None
+
+  internalTrafficPolicy: Cluster

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: employee-prod
+  labels:
+    environment: production
+    team: platform
+    application: employee-api
+    cost-center: engineering
+  annotations:
+    owner: platform-team
+    description: Production namespace for Employee API

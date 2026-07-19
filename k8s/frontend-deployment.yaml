@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: employee-ui
+  namespace: employee-prod
+  labels:
+    app: employee-ui
+    environment: production
+    tier: frontend
+
+spec:
+  replicas: 3
+
+  revisionHistoryLimit: 10
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      app: employee-ui
+
+  template:
+    metadata:
+      labels:
+        app: employee-ui
+        environment: production
+        tier: frontend
+
+    spec:
+
+      serviceAccountName: employee-api-sa
+
+      terminationGracePeriodSeconds: 30
+
+
+      nodeSelector:
+        workload: application
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: employee-ui
+              topologyKey: kubernetes.io/hostname
+
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: employee-ui
+
+      containers:
+      - name: employee-ui
+
+        image: 076124125794.dkr.ecr.us-east-1.amazonaws.com/python-crud-frontend:v4
+
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: http
+          containerPort: 8080
+
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+        startupProbe:
+          httpGet:
+            path: /
+            port: 8080
+          periodSeconds: 5
+          failureThreshold: 12
+
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 15
+
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+
+          capabilities:
+            drop:
+            - ALL
+
+          seccompProfile:
+            type: RuntimeDefault
+
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - sh
+              - -c
+              - sleep 10
+
+      volumes:
+      - name: tmp
+        emptyDir: {}

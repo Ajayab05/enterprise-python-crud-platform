@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: employee-api-config
+  namespace: employee-prod
+  labels:
+    app: employee-api
+    environment: production
+
+data:
+  DB_HOST: test.c8zsmesiuilk.us-east-1.rds.amazonaws.com
+  DB_PORT: "5432"
+  DB_NAME: employee_db
