@@ -1,4 +1,4 @@
-name: Python CRUD CI/CD
+name: CD Pipeline
 
 on:
   push:
@@ -13,141 +13,105 @@ env:
   AWS_REGION: us-east-1
   CLUSTER_NAME: enterprise-idp-lab-eks
 
-  BACKEND_REPO: enterprise-python-crud-backend
-  FRONTEND_REPO: enterprise-python-crud-frontend
+  BACKEND_REPOSITORY: python-crud-frontend
+  FRONTEND_REPOSITORY: python-crud-frontend
 
 jobs:
-  ci-cd:
+
+  deploy:
+
     runs-on: ubuntu-latest
 
     steps:
 
-      - name: Checkout Source
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
 
-      ##################################################
-      # Backend Validation
-      ##################################################
+    - name: Build Backend
+      run: |
+        docker build \
+        -t $BACKEND_REPOSITORY:${{ github.sha }} \
+        backend/
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+    - name: Tag Backend
+      run: |
+        docker tag \
+        $BACKEND_REPOSITORY:${{ github.sha }} \
+        ${{ steps.login-ecr.outputs.registry }}/$BACKEND_REPOSITORY:${{ github.sha }}
 
-      - name: Install Backend Dependencies
-        working-directory: backend
-        run: |
-          python -m pip install --upgrade pip
+        docker tag \
+        $BACKEND_REPOSITORY:${{ github.sha }} \
+        ${{ steps.login-ecr.outputs.registry }}/$BACKEND_REPOSITORY:latest
 
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
+    - name: Push Backend
+      run: |
+        docker push \
+        ${{ steps.login-ecr.outputs.registry }}/$BACKEND_REPOSITORY:${{ github.sha }}
 
-      - name: Validate Backend Files
-        working-directory: backend
-        run: |
-          test -f app.py
-          test -f config.py
-          test -f database.py
-          test -d models
-          test -d routes
-          echo "Backend Validation Passed"
+        docker push \
+        ${{ steps.login-ecr.outputs.registry }}/$BACKEND_REPOSITORY:latest
 
-      ##################################################
-      # Frontend Validation
-      ##################################################
+    - name: Build Frontend
+      run: |
+        docker build \
+        -t $FRONTEND_REPOSITORY:${{ github.sha }} \
+        frontend/
 
-      - name: Validate Frontend Files
-        working-directory: frontend
-        run: |
-          test -f index.html
-          test -f app.js
-          test -f nginx.conf
-          echo "Frontend Validation Passed"
+    - name: Tag Frontend
+      run: |
+        docker tag \
+        $FRONTEND_REPOSITORY:${{ github.sha }} \
+        ${{ steps.login-ecr.outputs.registry }}/$FRONTEND_REPOSITORY:${{ github.sha }}
 
-      ##################################################
-      # Build Backend Image
-      ##################################################
+        docker tag \
+        $FRONTEND_REPOSITORY:${{ github.sha }} \
+        ${{ steps.login-ecr.outputs.registry }}/$FRONTEND_REPOSITORY:latest
 
-      - name: Build Backend Docker Image
-        run: |
-          docker build \
-            -t ${{ steps.login-ecr.outputs.registry }}/${{ env.BACKEND_REPO }}:latest \
-            ./backend
+    - name: Push Frontend
+      run: |
+        docker push \
+        ${{ steps.login-ecr.outputs.registry }}/$FRONTEND_REPOSITORY:${{ github.sha }}
 
-      ##################################################
-      # Build Frontend Image
-      ##################################################
+        docker push \
+        ${{ steps.login-ecr.outputs.registry }}/$FRONTEND_REPOSITORY:latest
 
-      - name: Build Frontend Docker Image
-        run: |
-          docker build \
-            -t ${{ steps.login-ecr.outputs.registry }}/${{ env.FRONTEND_REPO }}:latest \
-            ./frontend
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v4
 
-      ##################################################
-      # Push Images
-      ##################################################
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig \
+        --name $CLUSTER_NAME \
+        --region $AWS_REGION
 
-      - name: Push Backend Image
-        run: |
-          docker push \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.BACKEND_REPO }}:latest
+    - name: Update Backend Image
+      run: |
+        kubectl set image deployment/employee-api \
+        employee-api=${{ steps.login-ecr.outputs.registry }}/$BACKEND_REPOSITORY:${{ github.sha }} \
+        -n employee
 
-      - name: Push Frontend Image
-        run: |
-          docker push \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.FRONTEND_REPO }}:latest
+    - name: Update Frontend Image
+      run: |
+        kubectl set image deployment/employee-ui \
+        employee-ui=${{ steps.login-ecr.outputs.registry }}/$FRONTEND_REPOSITORY:${{ github.sha }} \
+        -n employee
 
-      ##################################################
-      # Configure kubectl
-      ##################################################
+    - name: Wait for Rollout
+      run: |
+        kubectl rollout status deployment/employee-api -n employee
+        kubectl rollout status deployment/employee-ui -n employee
 
-      - name: Configure kubeconfig
-        run: |
-          aws eks update-kubeconfig \
-            --region $AWS_REGION \
-            --name $CLUSTER_NAME
-
-      ##################################################
-      # Deploy
-      ##################################################
-
-      - name: Restart Backend Deployment
-        run: |
-          kubectl rollout restart deployment/employee-api -n employee
-
-      - name: Restart Frontend Deployment
-        run: |
-          kubectl rollout restart deployment/employee-ui -n employee
-
-      ##################################################
-      # Verify
-      ##################################################
-
-      - name: Wait for Rollout
-        run: |
-          kubectl rollout status deployment/employee-api -n employee
-          kubectl rollout status deployment/employee-ui -n employee
-
-      - name: Verify Pods
-        run: |
-          kubectl get pods -n employee
-
-      - name: Verify Services
-        run: |
-          kubectl get svc -n employee
-
-      - name: Verify Ingress
-        run: |
-          kubectl get ingress -n employee
+    - name: Smoke Test
+      run: |
+        kubectl get pods -n employee
+        kubectl get svc -n employee
