@@ -1,84 +1,153 @@
-name: CI Pipeline
+name: Python CRUD CI/CD
 
 on:
   push:
     branches:
       - main
-      - develop
-  pull_request:
-    branches:
-      - main
 
 permissions:
+  id-token: write
   contents: read
-  security-events: write
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER_NAME: enterprise-idp-lab-eks
+
+  BACKEND_REPO: enterprise-python-crud-backend
+  FRONTEND_REPO: enterprise-python-crud-frontend
 
 jobs:
-  backend:
-    name: Backend Validation
+  ci-cd:
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: backend
-
     steps:
-      - name: Checkout Repository
+
+      - name: Checkout Source
         uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      ##################################################
+      # Backend Validation
+      ##################################################
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install Dependencies
+      - name: Install Backend Dependencies
+        working-directory: backend
         run: |
           python -m pip install --upgrade pip
+
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
 
-      - name: Validate Backend Structure
+      - name: Validate Backend Files
+        working-directory: backend
         run: |
           test -f app.py
           test -f config.py
           test -f database.py
           test -d models
           test -d routes
-          echo "✅ Backend validation passed."
+          echo "Backend Validation Passed"
 
-      - name: Run Tests (Optional)
-        run: |
-          if [ -d tests ] && [ "$(find tests -name '*.py' | wc -l)" -gt 0 ]; then
-            pip install pytest
-            pytest tests -v || true
-          else
-            echo "No tests found. Skipping."
-          fi
+      ##################################################
+      # Frontend Validation
+      ##################################################
 
-  frontend:
-    name: Frontend Validation
-    runs-on: ubuntu-latest
-
-    defaults:
-      run:
+      - name: Validate Frontend Files
         working-directory: frontend
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Validate Frontend Structure
         run: |
           test -f index.html
           test -f app.js
           test -f nginx.conf
-          echo "✅ Frontend validation passed."
+          echo "Frontend Validation Passed"
 
-  trivy:
-    name: Trivy Filesystem Scan
-    runs-on: ubuntu-latest
+      ##################################################
+      # Build Backend Image
+      ##################################################
 
-    needs:
-      - backend
-      - frontend
+      - name: Build Backend Docker Image
+        run: |
+          docker build \
+            -t ${{ steps.login-ecr.outputs.registry }}/${{ env.BACKEND_REPO }}:latest \
+            ./backend
+
+      ##################################################
+      # Build Frontend Image
+      ##################################################
+
+      - name: Build Frontend Docker Image
+        run: |
+          docker build \
+            -t ${{ steps.login-ecr.outputs.registry }}/${{ env.FRONTEND_REPO }}:latest \
+            ./frontend
+
+      ##################################################
+      # Push Images
+      ##################################################
+
+      - name: Push Backend Image
+        run: |
+          docker push \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.BACKEND_REPO }}:latest
+
+      - name: Push Frontend Image
+        run: |
+          docker push \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.FRONTEND_REPO }}:latest
+
+      ##################################################
+      # Configure kubectl
+      ##################################################
+
+      - name: Configure kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region $AWS_REGION \
+            --name $CLUSTER_NAME
+
+      ##################################################
+      # Deploy
+      ##################################################
+
+      - name: Restart Backend Deployment
+        run: |
+          kubectl rollout restart deployment/employee-api -n employee
+
+      - name: Restart Frontend Deployment
+        run: |
+          kubectl rollout restart deployment/employee-ui -n employee
+
+      ##################################################
+      # Verify
+      ##################################################
+
+      - name: Wait for Rollout
+        run: |
+          kubectl rollout status deployment/employee-api -n employee
+          kubectl rollout status deployment/employee-ui -n employee
+
+      - name: Verify Pods
+        run: |
+          kubectl get pods -n employee
+
+      - name: Verify Services
+        run: |
+          kubectl get svc -n employee
+
+      - name: Verify Ingress
+        run: |
+          kubectl get ingress -n employee
