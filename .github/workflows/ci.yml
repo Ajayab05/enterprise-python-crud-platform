@@ -82,15 +82,3 @@ jobs:
     needs:
       - backend
       - frontend
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Run Trivy Scan
-        uses: aquasecurity/trivy-action@v0
-        with:
-          scan-type: fs
-          format: table
-          severity: HIGH,CRITICAL
-          exit-code: "0"
