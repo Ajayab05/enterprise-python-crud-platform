@@ -13,7 +13,7 @@ env:
   AWS_REGION: us-east-1
   CLUSTER_NAME: enterprise-idp-lab-eks
 
-  BACKEND_REPOSITORY: python-crud-frontend
+  BACKEND_REPOSITORY: python-crud-backend
   FRONTEND_REPOSITORY: python-crud-frontend
 
 jobs:
