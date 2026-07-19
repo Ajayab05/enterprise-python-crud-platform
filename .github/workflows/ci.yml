@@ -8,6 +8,7 @@ on:
 permissions:
   id-token: write
   contents: read
+  security-events: write
 
 env:
   AWS_REGION: us-east-1
@@ -27,6 +28,10 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    #################################################
+    # AWS LOGIN
+    #################################################
+
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -37,11 +42,85 @@ jobs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
+    #################################################
+    # BUILD BACKEND
+    #################################################
+
     - name: Build Backend
       run: |
         docker build \
-        -t $BACKEND_REPOSITORY:${{ github.sha }} \
-        backend/
+          -t $BACKEND_REPOSITORY:${{ github.sha }} \
+          backend/
+
+    #################################################
+    # BUILD FRONTEND
+    #################################################
+
+    - name: Build Frontend
+      run: |
+        docker build \
+          -t $FRONTEND_REPOSITORY:${{ github.sha }} \
+          frontend/
+
+    #################################################
+    # HADOLINT
+    #################################################
+
+    - name: Scan Backend Dockerfile
+      uses: hadolint/hadolint-action@v3.1.0
+      continue-on-error: true
+      with:
+        dockerfile: backend/Dockerfile
+
+    - name: Scan Frontend Dockerfile
+      uses: hadolint/hadolint-action@v3.1.0
+      continue-on-error: true
+      with:
+        dockerfile: frontend/Dockerfile
+
+    #################################################
+    # GITLEAKS
+    #################################################
+
+    - name: Scan Secrets
+      uses: gitleaks/gitleaks-action@v2
+      continue-on-error: true
+
+    #################################################
+    # SEMGREP
+    #################################################
+
+    - name: Semgrep Scan
+      uses: returntocorp/semgrep-action@v1
+      continue-on-error: true
+
+    #################################################
+    # TRIVY BACKEND
+    #################################################
+
+    - name: Scan Backend Image
+      uses: aquasecurity/trivy-action@0.33.1
+      continue-on-error: true
+      with:
+        image-ref: python-crud-backend:${{ github.sha }}
+        format: table
+        exit-code: 0
+
+    #################################################
+    # TRIVY FRONTEND
+    #################################################
+
+    - name: Scan Frontend Image
+      uses: aquasecurity/trivy-action@0.33.1
+      continue-on-error: true
+      with:
+        image-ref: python-crud-frontend:${{ github.sha }}
+        format: table
+        exit-code: 0
+
+    #################################################
+    # TAG IMAGES
+    #################################################
 
     - name: Tag Backend
       run: |
@@ -53,20 +132,6 @@ jobs:
         $BACKEND_REPOSITORY:${{ github.sha }} \
         ${{ steps.login-ecr.outputs.registry }}/$BACKEND_REPOSITORY:latest
 
-    - name: Push Backend
-      run: |
-        docker push \
-        ${{ steps.login-ecr.outputs.registry }}/$BACKEND_REPOSITORY:${{ github.sha }}
-
-        docker push \
-        ${{ steps.login-ecr.outputs.registry }}/$BACKEND_REPOSITORY:latest
-
-    - name: Build Frontend
-      run: |
-        docker build \
-        -t $FRONTEND_REPOSITORY:${{ github.sha }} \
-        frontend/
-
     - name: Tag Frontend
       run: |
         docker tag \
@@ -77,6 +142,18 @@ jobs:
         $FRONTEND_REPOSITORY:${{ github.sha }} \
         ${{ steps.login-ecr.outputs.registry }}/$FRONTEND_REPOSITORY:latest
 
+    #################################################
+    # PUSH IMAGES
+    #################################################
+
+    - name: Push Backend
+      run: |
+        docker push \
+        ${{ steps.login-ecr.outputs.registry }}/$BACKEND_REPOSITORY:${{ github.sha }}
+
+        docker push \
+        ${{ steps.login-ecr.outputs.registry }}/$BACKEND_REPOSITORY:latest
+
     - name: Push Frontend
       run: |
         docker push \
@@ -84,6 +161,10 @@ jobs:
 
         docker push \
         ${{ steps.login-ecr.outputs.registry }}/$FRONTEND_REPOSITORY:latest
+
+    #################################################
+    # KUBECTL
+    #################################################
 
     - name: Install kubectl
       uses: azure/setup-kubectl@v4
@@ -94,24 +175,48 @@ jobs:
         --name $CLUSTER_NAME \
         --region $AWS_REGION
 
-    - name: Update Backend Image
+    #################################################
+    # DEPLOY
+    #################################################
+
+    - name: Update Backend
       run: |
         kubectl set image deployment/employee-api \
         employee-api=${{ steps.login-ecr.outputs.registry }}/$BACKEND_REPOSITORY:${{ github.sha }} \
         -n employee-prod
 
-    - name: Update Frontend Image
+    - name: Update Frontend
       run: |
         kubectl set image deployment/employee-ui \
         employee-ui=${{ steps.login-ecr.outputs.registry }}/$FRONTEND_REPOSITORY:${{ github.sha }} \
         -n employee-prod
+
+    #################################################
+    # WAIT
+    #################################################
 
     - name: Wait for Rollout
       run: |
         kubectl rollout status deployment/employee-api -n employee-prod
         kubectl rollout status deployment/employee-ui -n employee-prod
 
+    #################################################
+    # SMOKE TEST
+    #################################################
+
     - name: Smoke Test
       run: |
         kubectl get pods -n employee-prod
         kubectl get svc -n employee-prod
+        kubectl get ingress -n employee-prod
+
+    #################################################
+    # UPLOAD REPORTS
+    #################################################
+
+    - name: Upload Security Reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: DevSecOps-Reports
+        path: .
