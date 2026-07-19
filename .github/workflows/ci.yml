@@ -113,5 +113,5 @@ jobs:
 
     - name: Smoke Test
       run: |
-        kubectl get pods -n employee
-        kubectl get svc -n employee
+        kubectl get pods -n employee-prod
+        kubectl get svc -n employee-prod
