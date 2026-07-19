@@ -98,13 +98,13 @@ jobs:
       run: |
         kubectl set image deployment/employee-api \
         employee-api=${{ steps.login-ecr.outputs.registry }}/$BACKEND_REPOSITORY:${{ github.sha }} \
-        -n employee
+        -n employee-prod
 
     - name: Update Frontend Image
       run: |
         kubectl set image deployment/employee-ui \
         employee-ui=${{ steps.login-ecr.outputs.registry }}/$FRONTEND_REPOSITORY:${{ github.sha }} \
-        -n employee
+        -n employee-prod
 
     - name: Wait for Rollout
       run: |
