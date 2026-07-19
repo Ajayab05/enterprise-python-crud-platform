@@ -108,8 +108,8 @@ jobs:
 
     - name: Wait for Rollout
       run: |
-        kubectl rollout status deployment/employee-api -n employee
-        kubectl rollout status deployment/employee-ui -n employee
+        kubectl rollout status deployment/employee-api -n employee-prod
+        kubectl rollout status deployment/employee-ui -n employee-prod
 
     - name: Smoke Test
       run: |
